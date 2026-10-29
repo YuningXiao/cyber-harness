@@ -2,14 +2,46 @@
 
 本页保留各版本的用户可见变化与兼容信息，旧命令、配置和包路径仅表示当时的行为。当前操作见[使用者指南](README.md#使用者指南)，构建见[构建与嵌入](../README_CN.md#构建与嵌入)，历史实现请查阅对应 Git tag。
 
-## Unreleased
+## v1.0.0-rc9 — Reflex 反馈闭环、MCP 接入与可观测性
 
-- Reflex 编译工具公开完整产物字段和 `js:` 源码约束，回放失败时返回剩余原生调用，语义评审超限时报告各部分大小。纯离线回放在 5 秒后中断空转源码并返回可修复诊断，避免单个草稿占住编译任务。
-- 工具返回部分输出时保留失败原因；后台 subagent 仅返回错误时也通知父任务。联网搜索要求实际搜索执行记录，失败时保留后端原因。
-- browser、passive 与 Katana 可由入口直接导入组装，`full` 保留为 aiscan 的全量组合；原生 `record` 可独立于 `full` 构建。
-- Go 源码 API：工具结果与定义直接使用 `aop.ToolResult` / `aop.ToolDefinition`；Provider 类型和构造函数改从 `agent/provider` 引用，停止原因从 `agent/hooks` 引用。Context hook 直接返回 `[]*aop.Message`，nil 表示不替换。删除重复转导出别名，AOP wire 字段保持兼容。
-- JEV 原生调用与契约统一使用 `core/tool.NativeCall`、`NativeContract` 和 `NativeContracts`，访问分类直接使用 `NativeRead` / `NativeEffect` / `NativeUnsupported`；删除重复类型、转换和测试专用回放入口。
-- passive 的 `recon` 声明与连接检查迁至 `exts/passive/config`，运行实现不再依赖 scanner engine；CyberHub 索引查询迁至 `tools/cyberhub`。原有配置键与 CLI 参数保持兼容。
+rc9 完善 Reflex 从真实任务学习、编译修复到验证复用的流程，统一 Claim 与持久库结构；新增 MCP 工具命令接入和 OpenTelemetry 三信号导出，并改善 Web 中的执行回放、模型用量与远程终端体验。
+
+### New Features
+
+- **让任务经验持续复用。** JEV 统一使用 choice、score、noul 三类 Claim，从真实交互生成普通 Reflex；原生 `jev status`、`jev claim`、`jev compile` 命令共用生产编译与验证路径，支持查看、发布 Claim 和请求编译或替换。替换失败保留原 Reflex，退役保留 Claim 与归档记录。
+- **将 MCP 工具接入 Agent 的 bash。** 新增可选 Go 扩展，支持 stdio 和 Streamable HTTP，将服务端工具映射为按 schema 生成参数的子命令；通过 `--list`、`--help` 按需发现，复杂参数可用 JSON 或文件传入，完整结果可参与管道与重定向。接入与独立宿主示例见 [MCP 指南](mcp.md)。
+- **统一查看 Agent 的运行信号。** 通过 OTLP 环境配置导出 traces、结构化 logs 和 metrics，关联 Agent、模型、工具及后台编译，记录已报告的 token、耗时与失败；提供 SigNoz / Phoenix 本地部署示例。内容采集默认关闭，配置与计量边界见[可观测性指南](observability.md)。
+- **远程终端增加系统 Shell。** Web 可在节点 REPL、系统 Shell 和任务终端之间切换，并重新连接节点上仍在运行的 Shell 会话。
+
+### Improvements
+
+- **编译失败更容易修复。** Reflex 验证工具公开完整产物 schema 与 `js:` 源码要求；回放失败返回剩余原生调用，语义评审共享实际轨迹并报告超限内容大小。纯离线回放在 5 秒后中断空转源码，返回诊断供编译 Agent 继续修复。
+- **Reflex 执行过程更清楚。** 连续判定与原生调用合并为一个循环，区分 LLM、JEV 和工具，内联展示参数、回执与证据；实时执行和历史回放使用同一套时间线组件，支持自动循环、选择步骤停留和退出焦点后继续播放。
+- **模型用量直接显示在卡片中。** 紧凑展示输入、输出 token 与缓存命中比例，悬停或键盘聚焦可查看精确计数；思考、回复及编译父子卡片避免重复展示同一份用量。
+- 前端由应用层 Cordis 管理认证连接与插件生命周期；退出登录和热更新时清理资源，隔离迟到的认证响应与单个插件的渲染错误。
+
+### Bug Fixes
+
+- 修复工具已有部分输出时丢失失败原因，以及后台 subagent 只有错误时未通知父任务的问题；保留原始错误、媒体与控制信号，供模型继续处理。
+- 联网搜索要求实际搜索执行记录；后端失败或回退失败时保留原因，避免将普通文本响应误判为已完成搜索。
+- 修复后台编译因短请求超时或截断输出中止、执行不完整工具调用的问题；沿用临时错误重试，按需扩大输出预算，保留各次请求用量。后台编译单次 LLM 请求使用 30 分钟兜底，总编译期限默认不设上限，支持显式配置与取消。
+- 修复 Reflex 参数提取、已有句柄与新建资源名混淆及接管失败后反复选择同一函数的问题；未产生效果时允许交回主 Agent，已保留或派发的效果继续受日志保护。
+- 修复远程终端批量方向键丢失、输入乱序、光标查询挂起，以及窗口缩放后草稿重复或裁切；已关闭会话及时返回空闲终端。
+- 修复窄屏顶栏遮挡会话历史与审批入口、Reflex 库条目及详情重叠，以及执行图中思考内容不可见的问题。
+- 修复每周扫描回归仍引用已移除包路径的问题，更新能力组合与发布验收中的测试入口。
+
+### Architecture And Compatibility
+
+- **升级前备份 JEV 库。** 当前库只接受 `{claims,reflexes}` 结构，移除格式版本、候选集合及旧格式自动迁移；旧库不能直接加载，需保留备份并使用新库重新学习和验证。未知字段、损坏内容与失效引用会报错，原文件不会被自动改写。JEV 资格、步骤和参数 schema 改用结构化协议字段，相关消费者需同步更新。
+- browser、passive 与 Katana 可由入口直接导入组装，无需各自的能力 build tag；`full` 保留为 aiscan 的全量组合，原生 `record` 可独立于 `full` 构建。passive 的 `recon` 声明迁至 `exts/passive/config`，CyberHub 查询迁至 `tools/cyberhub`；原有配置键与 CLI 参数保持兼容。
+- Go 调用方改用 `aop.ToolResult` / `aop.ToolDefinition`、`agent/provider` 和 `agent/hooks` 的原始类型；Context hook 返回 `[]*aop.Message`，nil 表示不替换。JEV 原生调用、契约与访问分类直接引用 `core/tool` 的 `NativeCall`、`NativeContract`、`NativeContracts`、`NativeRead`、`NativeEffect` 和 `NativeUnsupported`，移除重复转导出与转换。
+- 移除旧参数兼容改写：`--init` 改用 `init --project --non-interactive`；Guardrail 模式使用 `auto` / `safe`，关闭策略使用 `provider: none`，错误策略使用 `review` / `block`；gogo 使用上游原生参数，JSONL 输出使用 `-o jl`。
+- 继续发布 `aiscan`、`aiscan-full` 和 `cyber-audit`，覆盖 Linux、macOS、Windows 的 amd64/arm64，共 18 个 ZIP 与校验文件；MCP 通过 Go 扩展显式组装，服务端与分析引擎需单独安装。
+
+### Known Limitations
+
+- Reflex 已有 Shadow DOM 保存和重复加购场景的真实冷学习、热接管记录，但最新修复后的完整浏览器冷/热验收尚未完成；报销提交及恢复场景仍未通过完整接管。冷编译成本可能较高，现有结果不能证明全程 token 或费用降低，验收范围与复现方式见 [JEV / Reflex 指南](jev.md)。
+- OpenTelemetry 基于现有 AOP 事实计量，逐次请求与启动、摘要等辅助调用的用量覆盖仍不完整；缺失用量保留未知，跨进程 W3C 上下文传播尚未实现。
 
 ## v1.0.0-rc8 — 工作台重构、节点接入与任务复用
 
